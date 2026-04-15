@@ -26,7 +26,20 @@ SYSTEM_PROMPT="${SYSTEM_PROMPT:-}"
 SYSTEM_PROMPT_FILE="${SYSTEM_PROMPT_FILE:-}"
 STANDARDS_FILE="${STANDARDS_FILE:-CLAUDE.md}"
 STANDARDS_FILE_CANDIDATES="${STANDARDS_FILE_CANDIDATES:-CLAUDE.md,claude.md,AGENTS.md,agents.md,.github/ai-review-rules.md,.github/ai-review-rules.txt}"
+CONTEXT_LIMIT_MODE="${CONTEXT_LIMIT_MODE:-normal}"
 OUTPUT_FILE="${GITHUB_OUTPUT:-/dev/null}"
+
+apply_context_limits() {
+  case "${CONTEXT_LIMIT_MODE:-normal}" in
+    minimal)
+      MAX_DIFF=40000; MAX_FILES=20000; MAX_CORPUS=60000 ;;
+    low)
+      MAX_DIFF=80000; MAX_FILES=40000; MAX_CORPUS=120000 ;;
+    normal|*)
+      MAX_DIFF=140000; MAX_FILES=70000; MAX_CORPUS=220000 ;;
+  esac
+}
+apply_context_limits
 
 if [[ -z "$REPO" || -z "$PR_NUMBER" || -z "$AI_BASE_URL" || -z "$AI_MODEL" ]]; then
   error "Missing required environment variables: REPO, PR_NUMBER, AI_BASE_URL, or AI_MODEL"
@@ -152,11 +165,11 @@ gh pr view "$PR_NUMBER" --repo "$REPO" \
   --json number,title,body,headRefOid,baseRefName,headRefName,author,changedFiles,additions,deletions,files,url > pr.json
 
 gh pr diff "$PR_NUMBER" --repo "$REPO" > pr.diff
-head -c 140000 pr.diff > pr.diff.truncated
+head -c "$MAX_DIFF" pr.diff > pr.diff.truncated
 
 gh api "repos/$REPO/pulls/$PR_NUMBER/files" --paginate > pr-files.raw.json
 jq '[.[] | {filename,status,additions,deletions,changes,previous_filename,patch}]' pr-files.raw.json > pr-files.json
-head -c 70000 pr-files.json > pr-files.truncated.json
+head -c "$MAX_FILES" pr-files.json > pr-files.truncated.json
 
 jq -r '.body // ""' pr.json > pr-body.txt
 
@@ -488,7 +501,7 @@ fi
   cat standards-context.md
 } > review-corpus.md
 
-head -c 220000 review-corpus.md > review-corpus.truncated.md
+head -c "$MAX_CORPUS" review-corpus.md > review-corpus.truncated.md
 
 log "Analyzing with $AI_MODEL..."
 

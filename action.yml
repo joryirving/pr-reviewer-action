@@ -67,6 +67,10 @@ inputs:
     description: If true, publish or update a PR comment with the generated review
     required: false
     default: "false"
+  context_limit_mode:
+    description: Context budget mode - normal (140k/70k/220k), low (80k/40k/120k), minimal (40k/20k/60k)
+    required: false
+    default: normal
   skip_if_diff_unchanged:
     description: If true, skip the LLM review when the effective PR diff matches the last managed review comment fingerprint
     required: false
@@ -141,6 +145,7 @@ runs:
         SYSTEM_PROMPT_FILE: ${{ inputs.system_prompt_file }}
         STANDARDS_FILE: ${{ inputs.standards_file }}
         STANDARDS_FILE_CANDIDATES: ${{ inputs.standards_file_candidates }}
+        CONTEXT_LIMIT_MODE: ${{ inputs.context_limit_mode }}
       run: bash "${{ github.action_path }}/scripts/run_review.sh"
 
     - name: Publish review comment

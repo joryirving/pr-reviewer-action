@@ -43,6 +43,7 @@ The action gathers PR metadata, diff context, linked sources, image digest prove
 | `standards_file` | Standards or conventions file from the reviewed repo | No | `CLAUDE.md` |
 | `standards_file_candidates` | Candidate files to auto-discover when `standards_file` is missing or blank | No | `CLAUDE.md,claude.md,AGENTS.md,agents.md,.github/ai-review-rules.md,.github/ai-review-rules.txt` |
 | `publish_review_comment` | Publish or update a managed PR comment | No | `false` |
+| `context_limit_mode` | Context budget mode: `normal` (140k/70k/220k), `low` (80k/40k/120k), `minimal` (40k/20k/60k) | No | `normal` |
 | `skip_if_diff_unchanged` | Skip the LLM review when the current PR patch matches the last managed review fingerprint | No | `true` |
 | `comment_marker` | HTML marker for the managed PR comment | No | `<!-- ai-pr-reviewer -->` |
 
@@ -185,6 +186,7 @@ If a repo wants more than policy context and needs to fully control the reviewer
 - `standards_file` is optional; if it is missing, the action will try `standards_file_candidates` before continuing without repository standards context.
 - By default, the action computes a stable patch fingerprint with `git patch-id --stable` and skips the LLM call when that fingerprint matches the most recent managed review comment. This avoids token spend on rebases and other history-only changes.
 - `publish_review_comment` uses `gh pr comment --edit-last --create-if-none`, so the comment is managed by the token identity used in the workflow.
+- `context_limit_mode` reduces the amount of PR data sent to the LLM. Use `minimal` for models with very small context windows. This skips nothing but truncates more aggressively.
 
 ## Validation
 
