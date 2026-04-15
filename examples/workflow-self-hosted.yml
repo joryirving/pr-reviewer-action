@@ -1,0 +1,29 @@
+name: AI PR Review
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: self-hosted
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Review PR with self-hosted model
+        uses: joryirving/pr-reviewer-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          ai_base_url: http://llama-server.internal:8080/v1
+          ai_model: qwen3-32b
+          standards_file: ""
+          publish_review_comment: "true"

@@ -1,0 +1,188 @@
+name: AI PR Reviewer
+description: Analyze a pull request with a self-hosted or cloud OpenAI-compatible model and optionally publish a sticky PR comment.
+
+inputs:
+  github_token:
+    description: GitHub token for PR and API access
+    required: true
+  repo:
+    description: Repository in owner/name format. Defaults to the current workflow repository.
+    required: false
+    default: ""
+  pr_number:
+    description: Pull request number. Defaults to the current pull_request event number.
+    required: false
+    default: ""
+  ai_base_url:
+    description: Base URL of the primary OpenAI-compatible API
+    required: true
+  ai_model:
+    description: Model name for the primary analysis pass
+    required: true
+  ai_api_key:
+    description: Optional bearer token for the primary AI endpoint
+    required: false
+    default: ""
+  ai_fallback_base_url:
+    description: Optional base URL of a fallback OpenAI-compatible API
+    required: false
+    default: ""
+  ai_fallback_model:
+    description: Optional model name for the fallback analysis pass
+    required: false
+    default: ""
+  ai_fallback_api_key:
+    description: Optional bearer token for the fallback AI endpoint
+    required: false
+    default: ""
+  ai_primary_retries:
+    description: Number of retries for the primary model
+    required: false
+    default: "8"
+  ai_primary_retry_delay_sec:
+    description: Delay between primary retries in seconds
+    required: false
+    default: "15"
+  allowed_source_hosts:
+    description: Comma-separated list of hosts allowed for linked source fetching
+    required: false
+    default: github.com,api.github.com,gitlab.com,registry.terraform.io,artifacthub.io
+  system_prompt:
+    description: Optional system prompt override
+    required: false
+    default: ""
+  system_prompt_file:
+    description: Optional file path in the reviewed repository to use as the full system prompt
+    required: false
+    default: ""
+  standards_file:
+    description: Repository standards file path for conventions and policy context
+    required: false
+    default: CLAUDE.md
+  standards_file_candidates:
+    description: Comma-separated candidate files to auto-discover when standards_file is not set or missing
+    required: false
+    default: CLAUDE.md,claude.md,AGENTS.md,agents.md,.github/ai-review-rules.md,.github/ai-review-rules.txt
+  publish_review_comment:
+    description: If true, publish or update a PR comment with the generated review
+    required: false
+    default: "false"
+  skip_if_diff_unchanged:
+    description: If true, skip the LLM review when the effective PR diff matches the last managed review comment fingerprint
+    required: false
+    default: "true"
+  comment_marker:
+    description: HTML comment marker used to identify the managed PR comment
+    required: false
+    default: <!-- ai-pr-reviewer -->
+
+outputs:
+  verdict:
+    description: AI verdict, approve or request_changes
+    value: ${{ steps.review.outputs.verdict }}
+  review_markdown:
+    description: Human-readable markdown review body
+    value: ${{ steps.review.outputs.review_markdown }}
+  analysis_engine:
+    description: Model and endpoint that produced the final result
+    value: ${{ steps.review.outputs.analysis_engine }}
+  should_review:
+    description: Whether the action determined a new LLM review is needed
+    value: ${{ steps.precheck.outputs.should_review }}
+  skip_reason:
+    description: Reason the LLM review was skipped
+    value: ${{ steps.precheck.outputs.skip_reason }}
+  diff_fingerprint:
+    description: Stable fingerprint of the current pull request patch
+    value: ${{ steps.precheck.outputs.diff_fingerprint }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate runtime dependencies
+      shell: bash
+      run: |
+        set -euo pipefail
+        command -v gh >/dev/null
+        command -v jq >/dev/null
+        command -v curl >/dev/null
+        command -v git >/dev/null
+        command -v python3 >/dev/null
+
+    - name: Check whether review is needed
+      id: precheck
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        REPO: ${{ inputs.repo || github.repository }}
+        PR_NUMBER: ${{ inputs.pr_number || github.event.pull_request.number }}
+        COMMENT_MARKER: ${{ inputs.comment_marker }}
+        SKIP_IF_DIFF_UNCHANGED: ${{ inputs.skip_if_diff_unchanged }}
+      run: bash "${{ github.action_path }}/scripts/check_review_needed.sh"
+
+    - name: Run AI review
+      if: steps.precheck.outputs.should_review == 'true'
+      id: review
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        REPO: ${{ inputs.repo || github.repository }}
+        PR_NUMBER: ${{ inputs.pr_number || github.event.pull_request.number }}
+        AI_BASE_URL: ${{ inputs.ai_base_url }}
+        AI_MODEL: ${{ inputs.ai_model }}
+        AI_API_KEY: ${{ inputs.ai_api_key }}
+        AI_FALLBACK_BASE_URL: ${{ inputs.ai_fallback_base_url }}
+        AI_FALLBACK_MODEL: ${{ inputs.ai_fallback_model }}
+        AI_FALLBACK_API_KEY: ${{ inputs.ai_fallback_api_key }}
+        AI_PRIMARY_RETRIES: ${{ inputs.ai_primary_retries }}
+        AI_PRIMARY_RETRY_DELAY_SEC: ${{ inputs.ai_primary_retry_delay_sec }}
+        ALLOWED_SOURCE_HOSTS: ${{ inputs.allowed_source_hosts }}
+        SYSTEM_PROMPT: ${{ inputs.system_prompt }}
+        SYSTEM_PROMPT_FILE: ${{ inputs.system_prompt_file }}
+        STANDARDS_FILE: ${{ inputs.standards_file }}
+        STANDARDS_FILE_CANDIDATES: ${{ inputs.standards_file_candidates }}
+      run: bash "${{ github.action_path }}/scripts/run_review.sh"
+
+    - name: Publish review comment
+      if: inputs.publish_review_comment == 'true' && steps.precheck.outputs.should_review == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        REPO: ${{ inputs.repo || github.repository }}
+        PR_NUMBER: ${{ inputs.pr_number || github.event.pull_request.number }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        DIFF_FINGERPRINT: ${{ steps.precheck.outputs.diff_fingerprint }}
+        VERDICT: ${{ steps.review.outputs.verdict }}
+        REVIEW_MARKDOWN: ${{ steps.review.outputs.review_markdown }}
+        ANALYSIS_ENGINE: ${{ steps.review.outputs.analysis_engine }}
+        COMMENT_MARKER: ${{ inputs.comment_marker }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "${PR_NUMBER:-}" ]; then
+          echo "publish_review_comment=true requires a pull_request event or explicit pr_number" >&2
+          exit 1
+        fi
+
+        if [ "$VERDICT" = "request_changes" ]; then
+          VERDICT_PREFIX="⚠️ **Automated recommendation: REQUEST CHANGES**"
+        else
+          VERDICT_PREFIX="✅ **Automated recommendation: APPROVE**"
+        fi
+
+        {
+          echo "$COMMENT_MARKER"
+          if [ -n "${HEAD_SHA:-}" ]; then
+            echo "<!-- ai-pr-review-sha:${HEAD_SHA} -->"
+          fi
+          if [ -n "${DIFF_FINGERPRINT:-}" ]; then
+            echo "<!-- ai-pr-review-fingerprint:${DIFF_FINGERPRINT} -->"
+          fi
+          echo "$VERDICT_PREFIX"
+          echo
+          echo "_Analysis engine: ${ANALYSIS_ENGINE}_"
+          echo
+          printf '%s\n' "$REVIEW_MARKDOWN"
+        } > review-comment.md
+
+        gh pr comment "$PR_NUMBER" --repo "$REPO" --edit-last --create-if-none --body-file review-comment.md

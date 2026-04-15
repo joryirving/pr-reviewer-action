@@ -1,0 +1,30 @@
+name: AI PR Review
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Review PR with cloud model
+        uses: joryirving/pr-reviewer-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          ai_base_url: https://api.openai.com/v1
+          ai_model: gpt-4.1-mini
+          ai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          standards_file: ""
+          publish_review_comment: "true"
