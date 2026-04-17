@@ -173,6 +173,56 @@ head -c "$MAX_FILES" pr-files.json > pr-files.truncated.json
 
 jq -r '.body // ""' pr.json > pr-body.txt
 
+log "Gathering linked issue context..."
+python3 - <<'PY' > linked-issues.json
+import json
+import os
+import re
+from pathlib import Path
+
+repo = os.environ["REPO"]
+body = Path("pr-body.txt").read_text(encoding="utf-8", errors="replace")
+pattern = re.compile(r'(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?[ \t]+((?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#\d+)')
+seen = set()
+items = []
+for match in pattern.finditer(body):
+    ref = match.group(1)
+    if ref in seen:
+        continue
+    seen.add(ref)
+    if "/" in ref:
+        repo_name, issue_number = ref.split("#", 1)
+    else:
+        repo_name, issue_number = repo, ref[1:]
+    items.append({"ref": ref, "repo": repo_name, "number": int(issue_number)})
+print(json.dumps(items[:8]))
+PY
+
+: > linked-issues.md
+if [ "$(jq 'length' linked-issues.json)" -gt 0 ]; then
+  echo "# Linked Issue Context" >> linked-issues.md
+  echo >> linked-issues.md
+  jq -c '.[]' linked-issues.json | while IFS= read -r item; do
+    issue_repo="$(printf '%s' "$item" | jq -r '.repo')"
+    issue_number="$(printf '%s' "$item" | jq -r '.number')"
+    issue_ref="$(printf '%s' "$item" | jq -r '.ref')"
+
+    echo "## $issue_ref" >> linked-issues.md
+    if gh api "repos/$issue_repo/issues/$issue_number" > linked-issue.raw.json 2>/dev/null; then
+      jq '{number,title,state,html_url,labels:[.labels[]?.name],body}' linked-issue.raw.json > linked-issue.filtered.json
+      echo '```json' >> linked-issues.md
+      head -c 12000 linked-issue.filtered.json >> linked-issues.md
+      echo >> linked-issues.md
+      echo '```' >> linked-issues.md
+    else
+      echo "(Could not fetch issue $issue_ref from $issue_repo)" >> linked-issues.md
+    fi
+    echo >> linked-issues.md
+  done
+else
+  echo "No linked issue references found in the PR body." >> linked-issues.md
+fi
+
 cat pr-body.txt pr.diff.truncated \
   | grep -Eo 'https?://[^ )]+' \
   | sed 's/[",.;]$//' \
@@ -513,6 +563,9 @@ fi
   echo '```json'
   jq . pr.json
   echo '```'
+  echo
+  echo "# Linked Issue Context"
+  cat linked-issues.md
   echo
   echo "# PR Files (truncated)"
   echo '```json'
