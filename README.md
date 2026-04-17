@@ -4,7 +4,7 @@ Analyze pull requests with a self-hosted or cloud OpenAI-compatible model.
 
 [![CI](https://github.com/joryirving/pr-reviewer-action/actions/workflows/ci.yaml/badge.svg)](https://github.com/joryirving/pr-reviewer-action/actions/workflows/ci.yaml)
 
-The action gathers PR metadata, diff context, linked sources, image digest provenance, basic repository impact/history, and an optional standards file such as `CLAUDE.md`. It returns a structured verdict and markdown review body, and it can also publish or update a sticky PR comment.
+The action gathers PR metadata, diff context, linked issue context from PR-closing references, linked sources, image digest provenance, basic repository impact/history, and an optional standards file such as `CLAUDE.md`. It returns a structured verdict and markdown review body, and it can also publish or update a sticky PR comment.
 
 ## What it supports
 
@@ -13,6 +13,7 @@ The action gathers PR metadata, diff context, linked sources, image digest prove
 - optional fallback model/endpoint
 - optional managed PR comment publishing
 - automatic skip when the effective PR diff is unchanged since the last managed review
+- linked issue body ingestion from `Fixes #123`, `Closes owner/repo#456`, and similar PR-body references
 - repo-provided rules via `CLAUDE.md`, `AGENTS.md`, or a custom file
 - full prompt override via inline text or a file in the destination repo
 
@@ -163,6 +164,10 @@ You can also pin a specific rules file:
     ai_api_key: ${{ secrets.OPENAI_API_KEY }}
     standards_file: .github/review-rules.md
 ```
+
+### Issue-first review workflows
+
+If PRs are driven by detailed GitHub issues, include closing references such as `Fixes #40` or `Closes owner/repo#12` in the PR body. The action will fetch those issue bodies and include them in the review corpus so the model can compare the implementation against issue guidance and acceptance criteria.
 
 ### Use a repo-local prompt file
 
