@@ -58,11 +58,11 @@ inputs:
   standards_file:
     description: Repository standards file path for conventions and policy context
     required: false
-    default: CLAUDE.md
+    default: ""
   standards_file_candidates:
-    description: Comma-separated candidate files to auto-discover when standards_file is not set or missing
+    description: Candidate files to auto-discover when standards_file is not set. First found is used.
     required: false
-    default: CLAUDE.md,claude.md,AGENTS.md,agents.md,.github/ai-review-rules.md,.github/ai-review-rules.txt
+    default: AGENTS.md,agents.md,CLAUDE.md,claude.md,.github/ai-review-rules.md,.github/ai-review-rules.txt
   publish_review_comment:
     description: If true, publish or update a PR comment with the generated review
     required: false
