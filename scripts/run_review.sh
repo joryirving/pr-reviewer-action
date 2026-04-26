@@ -31,6 +31,12 @@ EVIDENCE_PROVIDERS_FILE="${EVIDENCE_PROVIDERS_FILE:-}"
 EVIDENCE_PROVIDER_TIMEOUT_SEC="${EVIDENCE_PROVIDER_TIMEOUT_SEC:-30}"
 EVIDENCE_PROVIDER_MAX_OUTPUT_BYTES="${EVIDENCE_PROVIDER_MAX_OUTPUT_BYTES:-20000}"
 EVIDENCE_BLOCKER_ENFORCEMENT="${EVIDENCE_BLOCKER_ENFORCEMENT:-false}"
+EVIDENCE_ENABLE_FOR_FORKS="${EVIDENCE_ENABLE_FOR_FORKS:-false}"
+TOOL_MODE="${TOOL_MODE:-off}"
+TOOL_MAX_REQUESTS="${TOOL_MAX_REQUESTS:-4}"
+TOOL_MAX_RESPONSE_BYTES="${TOOL_MAX_RESPONSE_BYTES:-12000}"
+TOOL_PLANNING_MAX_CONTEXT_BYTES="${TOOL_PLANNING_MAX_CONTEXT_BYTES:-90000}"
+TOOL_ENABLE_FOR_FORKS="${TOOL_ENABLE_FOR_FORKS:-false}"
 OUTPUT_FILE="${GITHUB_OUTPUT:-/dev/null}"
 
 apply_context_limits() {
@@ -102,6 +108,14 @@ resolve_system_prompt() {
 resolve_standards_file
 resolve_system_prompt
 
+case "$(printf '%s' "$TOOL_MODE" | tr '[:upper:]' '[:lower:]')" in
+  off|plan_execute_once) ;;
+  *)
+    error "Invalid TOOL_MODE '$TOOL_MODE'; defaulting to off"
+    TOOL_MODE="off"
+    ;;
+esac
+
 curl_model() {
   local base_url="$1"
   local api_key="$2"
@@ -167,6 +181,11 @@ log "Collecting PR context for #$PR_NUMBER in $REPO..."
 
 gh pr view "$PR_NUMBER" --repo "$REPO" \
   --json number,title,body,headRefOid,baseRefName,headRefName,author,changedFiles,additions,deletions,files,url > pr.json
+
+IS_FORK_PR="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '((.head.repo.full_name // "") != (.base.repo.full_name // ""))' 2>/dev/null || echo false)"
+if [[ "$IS_FORK_PR" == "true" ]]; then
+  log "Detected cross-repository pull request"
+fi
 
 gh pr diff "$PR_NUMBER" --repo "$REPO" > pr.diff
 head -c "$MAX_DIFF" pr.diff > pr.diff.truncated
@@ -549,14 +568,23 @@ else
 fi
 
 log "Running optional evidence providers..."
-if ! python3 "$SCRIPT_DIR/run_evidence_providers.py"; then
-  error "Evidence provider execution failed"
+if [[ "$IS_FORK_PR" == "true" ]] && [[ "$(printf '%s' "$EVIDENCE_ENABLE_FOR_FORKS" | tr '[:upper:]' '[:lower:]')" != "true" ]]; then
   cat > evidence-providers.md <<'EOF'
-Evidence providers failed to run in this review.
+Evidence providers were skipped for a cross-repository pull request. Set evidence_enable_for_forks=true to override.
 EOF
   cat > evidence-providers.json <<'EOF'
+{"configured": false, "has_blocker": false, "providers": [], "skipped": true, "skip_reason": "fork-pr"}
+EOF
+else
+  if ! python3 "$SCRIPT_DIR/run_evidence_providers.py"; then
+    error "Evidence provider execution failed"
+    cat > evidence-providers.md <<'EOF'
+Evidence providers failed to run in this review.
+EOF
+    cat > evidence-providers.json <<'EOF'
 {"configured": false, "has_blocker": false, "providers": [], "error": "execution failed"}
 EOF
+  fi
 fi
 
 log "Building review corpus..."
@@ -570,53 +598,95 @@ else
   echo "($STANDARDS_FILE not found; standards context unavailable.)" >> standards-context.md
 fi
 
-{
-  echo "# Changed Manifest Context"
-  cat manifest-context.md
-  echo
-  echo "# PR Metadata"
-  echo '```json'
-  jq . pr.json
-  echo '```'
-  echo
-  echo "# Linked Issue Context"
-  cat linked-issues.md
-  echo
-  echo "# PR Files (truncated)"
-  echo '```json'
-  cat pr-files.truncated.json
-  echo '```'
-  echo
-  echo "# Version Hints from Diff"
-  echo '```text'
-  cat version-hints.truncated.txt 2>/dev/null || echo "(none)"
-  echo '```'
-  echo
-  echo "# PR Diff (truncated)"
-  echo '```diff'
-  cat pr.diff.truncated
-  echo '```'
-  echo
-  echo "# Linked Sources"
-  cat linked-sources.md
-  echo
-  echo "# Evidence Providers"
-  cat evidence-providers.md
-  echo
-  echo "# Image Digest Provenance"
-  cat image-digest-context.md
-  echo
-  echo "# Repository Impact Scan"
-  cat repo-impact.truncated.md
-  echo
-  echo "# Repository History"
-  cat repo-history.truncated.md
-  echo
-  echo "# Repository Standards and Conventions ($STANDARDS_FILE)"
-  cat standards-context.md
-} > review-corpus.md
+if [ ! -f tool-harness.md ]; then
+  cat > tool-harness.md <<'EOF'
+Tool harness disabled.
+EOF
+fi
 
+if [ ! -f tool-harness.json ]; then
+  cat > tool-harness.json <<'EOF'
+{"mode":"off","planned_request_count":0,"executed_request_count":0,"tool_results":[]}
+EOF
+fi
+
+build_review_corpus() {
+  {
+    echo "# Changed Manifest Context"
+    cat manifest-context.md
+    echo
+    echo "# PR Metadata"
+    echo '```json'
+    jq . pr.json
+    echo '```'
+    echo
+    echo "# Linked Issue Context"
+    cat linked-issues.md
+    echo
+    echo "# PR Files (truncated)"
+    echo '```json'
+    cat pr-files.truncated.json
+    echo '```'
+    echo
+    echo "# Version Hints from Diff"
+    echo '```text'
+    cat version-hints.truncated.txt 2>/dev/null || echo "(none)"
+    echo '```'
+    echo
+    echo "# PR Diff (truncated)"
+    echo '```diff'
+    cat pr.diff.truncated
+    echo '```'
+    echo
+    echo "# Linked Sources"
+    cat linked-sources.md
+    echo
+    echo "# Evidence Providers"
+    cat evidence-providers.md
+    echo
+    echo "# Tool Harness Findings"
+    cat tool-harness.md
+    echo
+    echo "# Image Digest Provenance"
+    cat image-digest-context.md
+    echo
+    echo "# Repository Impact Scan"
+    cat repo-impact.truncated.md
+    echo
+    echo "# Repository History"
+    cat repo-history.truncated.md
+    echo
+    echo "# Repository Standards and Conventions ($STANDARDS_FILE)"
+    cat standards-context.md
+  } > review-corpus.md
+}
+
+build_review_corpus
 head -c "$MAX_CORPUS" review-corpus.md > review-corpus.truncated.md
+
+if [[ "$(printf '%s' "$TOOL_MODE" | tr '[:upper:]' '[:lower:]')" == "plan_execute_once" ]]; then
+  if [[ "$IS_FORK_PR" == "true" ]] && [[ "$(printf '%s' "$TOOL_ENABLE_FOR_FORKS" | tr '[:upper:]' '[:lower:]')" != "true" ]]; then
+    cat > tool-harness.md <<'EOF'
+Tool harness was skipped for a cross-repository pull request. Set tool_enable_for_forks=true to override.
+EOF
+    cat > tool-harness.json <<'EOF'
+{"mode":"plan_execute_once","planned_request_count":0,"executed_request_count":0,"tool_results":[],"skipped":true,"skip_reason":"fork-pr"}
+EOF
+  else
+    log "Running tool harness in mode: $TOOL_MODE"
+    if ! python3 "$SCRIPT_DIR/run_tool_harness.py"; then
+      error "Tool harness execution failed"
+      cat > tool-harness.md <<'EOF'
+Tool harness failed to run in this review.
+EOF
+      cat > tool-harness.json <<'EOF'
+{"mode":"plan_execute_once","planned_request_count":0,"executed_request_count":0,"tool_results":[],"error":"execution failed"}
+EOF
+    fi
+  fi
+  build_review_corpus
+  head -c "$MAX_CORPUS" review-corpus.md > review-corpus.truncated.md
+fi
 
 log "Analyzing with $AI_MODEL..."
 
