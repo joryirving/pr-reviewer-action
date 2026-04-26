@@ -56,6 +56,7 @@ The action gathers PR metadata, diff context, linked issue context from PR-closi
 | `tool_max_requests` | Maximum tool requests executed in one harness run | No | `4` |
 | `tool_planning_timeout_sec` | Timeout in seconds for tool harness planning model call | No | `30` |
 | `tool_planning_max_context_bytes` | Maximum corpus bytes passed to planning | No | `50000` |
+| `tool_planning_max_tokens` | Maximum completion tokens for tool harness planning call | No | `400` |
 | `tool_max_response_bytes` | Maximum bytes captured from each tool response | No | `12000` |
 | `tool_allowed_gh_api_repos` | Comma-separated owner/repo allowlist for `gh_api` (empty = current repo only) | No | `""` |
 | `tool_request_timeout_sec` | Timeout in seconds for each tool execution request | No | `20` |
@@ -199,6 +200,7 @@ Provider commands can print plain text, or JSON with fields such as `severity` a
     tool_max_requests: "4"
     tool_planning_timeout_sec: "30"
     tool_planning_max_context_bytes: "50000"
+    tool_planning_max_tokens: "400"
     tool_max_response_bytes: "12000"
     tool_allowed_gh_api_repos: "siderolabs/kubelet,siderolabs/talos"
     tool_request_timeout_sec: "20"
@@ -276,9 +278,10 @@ If a repo wants more than policy context and needs to fully control the reviewer
 - Tool harness planning treats corpus content as untrusted data and uses strict tool/path/host allowlists with output redaction.
 - Evidence providers and tool harness are both disabled by default on cross-repository PRs (`*_enable_for_forks=false`).
 - `gh_api` defaults to current-repo scope only. Use `tool_allowed_gh_api_repos` to allow specific upstream repos.
-- For local models, reduce `tool_planning_max_context_bytes` and `tool_planning_timeout_sec` to avoid long planning calls.
+- For local models, reduce `tool_planning_max_context_bytes` and `tool_planning_max_tokens`, and increase `tool_planning_timeout_sec` as needed.
 - Set `tool_failure_enforcement=true` to fail closed when tool harness planning fails or when every tool request fails.
 - Use `tool_min_successful_requests` (for example `1`) to enforce a minimum successful tool-evidence threshold.
+- Model requests use `curl -q` so user-level `.curlrc` timeouts do not unexpectedly cancel long-running local model calls.
 
 ## Validation
 
