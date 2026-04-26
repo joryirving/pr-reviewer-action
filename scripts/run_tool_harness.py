@@ -44,6 +44,11 @@ def env_int(name, default_value, min_value):
     return max(min_value, value)
 
 
+def env_int_bounded(name, default_value, min_value, max_value):
+    value = env_int(name, default_value, min_value)
+    return min(max_value, value)
+
+
 def normalize_host(host):
     return (host or "").strip().lower()
 
@@ -121,7 +126,13 @@ def safe_run(args, timeout_sec):
 
 
 def run_chat_completion(
-    base_url, model, api_key, system_prompt, user_prompt, timeout_sec
+    base_url,
+    model,
+    api_key,
+    system_prompt,
+    user_prompt,
+    timeout_sec,
+    max_tokens,
 ):
     payload = {
         "model": model,
@@ -130,6 +141,7 @@ def run_chat_completion(
             {"role": "user", "content": user_prompt},
         ],
         "temperature": 0.0,
+        "max_tokens": max_tokens,
     }
     endpoint = base_url.rstrip("/") + "/chat/completions"
     body = json.dumps(payload).encode("utf-8")
@@ -383,6 +395,7 @@ def main():
     max_bytes = env_int("TOOL_MAX_RESPONSE_BYTES", 12000, 1000)
     max_context = env_int("TOOL_PLANNING_MAX_CONTEXT_BYTES", 50000, 5000)
     planning_timeout_sec = env_int("TOOL_PLANNING_TIMEOUT_SEC", 45, 1)
+    planning_max_tokens = env_int_bounded("TOOL_PLANNING_MAX_TOKENS", 400, 64, 4096)
     request_timeout_sec = env_int("TOOL_REQUEST_TIMEOUT_SEC", 20, 1)
     allowlist = [
         normalize_host(item)
@@ -452,6 +465,7 @@ def main():
             planning_system,
             planning_user,
             planning_timeout_sec,
+            planning_max_tokens,
         )
     except Exception as exc:  # noqa: BLE001
         planning_error = str(exc)
