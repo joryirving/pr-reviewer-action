@@ -211,6 +211,9 @@ for start in range(len(text)):
 if parsed is None:
     raise SystemExit("Could not extract JSON object from model response")
 
+if isinstance(parsed, list) and len(parsed) == 1 and isinstance(parsed[0], dict):
+    parsed = parsed[0]
+
 if not isinstance(parsed, dict):
     raise SystemExit(f"Expected JSON object but got {type(parsed).__name__}")
 
